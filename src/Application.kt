@@ -90,7 +90,10 @@ fun Application.module(testing: Boolean = false) {
                         val incomingData = Gson().fromJson(frame.readText(), ChatData::class.java)
                         incomingData.msgTimestamp = Date()
                         println(incomingData)
-                        send(Gson().toJson(incomingData))
+                        for(conn in connections){
+
+                            conn.webSocketSession.send(Gson().toJson(incomingData))
+                        }
                     }
                 }
             }finally {
