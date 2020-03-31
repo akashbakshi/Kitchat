@@ -1,6 +1,7 @@
 package com.akashbakshi
 
 import com.google.gson.Gson
+import com.mongodb.MongoClientURI
 import io.ktor.application.*
 import io.ktor.response.*
 import io.ktor.request.*
@@ -16,9 +17,13 @@ import io.ktor.features.*
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.resources
 import io.ktor.http.content.static
+import io.ktor.server.engine.commandLineEnvironment
+import io.ktor.server.engine.embeddedServer
+import io.ktor.server.netty.Netty
 import io.ktor.util.toZonedDateTime
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.runBlocking
+import org.litote.kmongo.*
 import java.io.File
 import java.net.Socket
 import java.nio.channels.ClosedChannelException
@@ -27,12 +32,21 @@ import kotlin.collections.LinkedHashSet
 
 val connections =  arrayListOf<SocketSession>() // store all Websocket connections
 val rooms = arrayListOf<RoomData>() // store all the rooms
+val uri = MongoClientURI("mongodb://root:rootPassword@localhost:27017/")
+val mongoClient = KMongo.createClient(uri = uri)
 
-fun main(args: Array<String>): Unit = io.ktor.server.netty.EngineMain.main(args)
+val db = mongoClient.getDatabase("kitchatDB")
+val userCol = db.getCollection<UserSession>()
+val chatCol = db.getCollection<ChatData>()
+
+fun main(args: Array<String>){
+    embeddedServer(Netty, commandLineEnvironment(args)).start(wait = true)
+}
 
 @Suppress("unused") // Referenced in application.conf
 @kotlin.jvm.JvmOverloads
 fun Application.module(testing: Boolean = false) {
+
     install(FreeMarker) {
         templateLoader = ClassTemplateLoader(this::class.java.classLoader, "templates")
     }
@@ -62,14 +76,31 @@ fun Application.module(testing: Boolean = false) {
         }
         get("/") {
             call.respond(FreeMarkerContent("index.ftl",null,""))
+
         }
         get("/chatroom"){
             val roomName = call.request.queryParameters["roomName"] // get room name from queryString
 
             val userSession = call.sessions.get<UserSession>()
-
-            call.respond(FreeMarkerContent("chat.ftl",mapOf("name" to roomName,"username" to userSession?.username ),""))
+            val chatMsgs = chatCol.find(ChatData::roomName eq roomName).into(mutableListOf<ChatData>())
+            call.respond(FreeMarkerContent("chat.ftl",mapOf("name" to roomName,"username" to userSession?.username,"chat" to chatMsgs ),""))
         }
+
+        get("/signup"){
+
+        }
+        post("/signup"){
+
+        }
+
+
+        get("/login"){
+
+        }
+        post("/login"){
+
+        }
+
 
         post("/enterchat"){
             val formData = call.receiveParameters()
@@ -122,7 +153,9 @@ suspend fun handleSocketMessage(msg:SocketMsg){
         connections.forEach {
             if (it.user.id == handshakeData.id) { // loop through all WebSocketSessions and see if the SocketId sent from client matches any active WebSocketSession SocketId
                 it.user.username = handshakeData.username // if we get a hit then we want to now set the username sent from client in the handshake phase to make things easier to search for
+                userCol.insertOne(it.user)
                 addToRoom(handshakeData.room,it)
+
             }
         }
         connections.forEach { it.webSocketSession.send(createServerMsgString(-1,handshakeData)) }
@@ -131,10 +164,11 @@ suspend fun handleSocketMessage(msg:SocketMsg){
         //we received a message from the chat box
         val chatData = Gson().fromJson(msg.data,ChatData::class.java) // parse the data object as chat data now instead
         chatData.msgTimestamp = Date()
-        println(msg)
+        chatCol.insertOne(chatData)
+
         for(conn in connections){
 
-            conn.webSocketSession.send("{\"type\":0,\"data\":${Gson().toJson(chatData)}")
+            conn.webSocketSession.send(createServerMsgString(1,chatData))
         }
     }
 }
@@ -172,10 +206,14 @@ suspend fun roomBroadcast(room:String, msg:String) {
 fun addToRoom(room:String,socketSession:SocketSession){
     val roomToFind = rooms.find { it.name == room }
     if (roomToFind == null) {
-        rooms.add(RoomData(room, arrayListOf(socketSession)) )  // add new room to our array
+        val newRoom = RoomData(room, arrayListOf(socketSession))
+        rooms.add(newRoom )  // add new room to our array
+
     }else{
         roomToFind.users.add(socketSession)
     }
+
+
 }
 
 fun removeFromRooms(socketSession:SocketSession){
@@ -187,6 +225,7 @@ fun removeFromRooms(socketSession:SocketSession){
 data class SocketMsg(val type:Int,var data:String)
 data class ChatData(val username:String, val content:String, val roomName: String, var msgTimestamp: Date )
 data class RoomData(val name:String, var users: ArrayList<SocketSession>)
+
 data class UserSession(val id:String,var username:String?)
 data class HandshakeData(val id:String,val username:String,val room:String)
 data class SocketSession(val user:UserSession,val webSocketSession: WebSocketSession)

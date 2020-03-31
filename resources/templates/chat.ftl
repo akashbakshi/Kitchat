@@ -23,14 +23,14 @@
                     // if we get type 1, we have received a new message in our chat room, we will add the card with the message details to our page
                     let msgBoard = document.getElementById("msgboard");
                     let newMsg =  document.createElement("div");
-                    newMsg.innerHTML = "<div class='fade-in card my-2'>" +
-                        "<div class='card-body'><h5>"+msgData.content+"</h5> </div> " +
+                    msgBoard.innerHTML += "<div class='fade-in card my-2'>" +
+                        "<div class='card-body'><h5>"+msgData.data.content+"</h5> </div> " +
                             "<div class='card-footer d-flex justify-content-between'> "+
-                                "<h6 class='text-muted'>"+msgData.username+"</h6>"+
-                                "<p class='text-muted'>"+msgData.msgTimestamp+"</p>"+
+                                "<h6 class='text-muted'>"+msgData.data.username+"</h6>"+
+                                "<p class='text-muted'>"+msgData.data.msgTimestamp+"</p>"+
                             "</div>"+
                         "</div>";
-                    msgBoard.prepend(newMsg);
+                    msgBoard.appendChild(newMsg);
 
                 }
             };
@@ -51,10 +51,22 @@
         <div class="container justify-content-center">
             <h2 class="font-weight-bold my-5">Chat Room - ${name}</h2>
 
-        <div id="msgboard" class="my-5">
+            <div id="msgboard" class="my-2">
+            <#list chat as msg>
+
+                    <div class='fade-in card my-1'>
+                        <div class='card-body'>
+                            <h5>${msg.content}</h5>
+                        </div>
+                        <div class='card-footer d-flex justify-content-between'>
+                            <h6 class='text-muted'>${msg.username}</h6>
+                            <p class='text-muted'>${msg.msgTimestamp?datetime?string("MMM dd, yyyy h:mm:ss a")}</p>
+                        </div>
+                    </div>
 
 
-        </div>
+            </#list>
+            </div>
         <form class="my-5" >
             <div class="form-group">
 

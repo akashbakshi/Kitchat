@@ -1,0 +1,33 @@
+version: '3'
+
+services:
+
+  backend:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    restart: always
+    image: kitchat-engine:latest
+    container_name: kitchat
+    environment:
+      KTOR_ENV: PROD
+      DB_URL: "jdbc://db/kitchatDB"
+    ports:
+      - 5000:5000
+    depends_on:
+      - db
+    links:
+      - db
+  db:
+    image: mongo:latest
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootPassword
+    volumes:
+      -  ./data:/var/lib/mongo/kitchatDB
+    ports:
+      - 27017:27017
+    expose:
+      - 27017
+
+
