@@ -1,8 +1,6 @@
 <html>
     <head>
-        <link rel="stylesheet" href="/static/css/bootstrap.min.css"/>
-        <link rel="stylesheet" href="/static/css/mdb.min.css"/>
-        <link rel="stylesheet" href="/static/css/style.css"/>
+
         <script>
             let ws = new WebSocket("ws://localhost:5000/chat");
             var socketId;
@@ -49,11 +47,7 @@
     </head>
 
     <body>
-        <script type="text/javascript" src="/static/js/jquery.js"></script>
-        <script type="text/javascript" src="/static/js/popper.js"></script>
-        <script type="text/javascript" src="/static/js/bootstrap.js"></script>
-        <script type="text/javascript" src="/static/js/mdb.js"></script>
-
+        <#include "menu.ftl">
         <div class="container justify-content-center">
             <h2 class="font-weight-bold my-5">Chat Room - ${name}</h2>
 
