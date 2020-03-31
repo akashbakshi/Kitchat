@@ -20,7 +20,7 @@
                 else if(msgData.type === 0){
                     // initial handshake type, we will get the socketId, set our var and then send a message back with our username
                     socketId = msgData.data.id;
-                    ws.send(JSON.stringify({"type":0,"data":{"id":socketId,"username":"${room.username}"}}));
+                    ws.send(JSON.stringify({"type":0,"data":{"id":socketId,"username":"${username}","room":"${name}"}}));
                 } else if(msgData.type === 1){
                     // if we get type 1, we have received a new message in our chat room, we will add the card with the message details to our page
                     let msgBoard = document.getElementById("msgboard");
@@ -41,11 +41,11 @@
                 let msg = document.getElementById('msg');
                 let author = document.getElementById('username').value;
 
-                ws.send(JSON.stringify({type:1,data:{username:author,content:msg.value,roomName:"${room.name}"}})); // send type 1(new msg), and our username,the message, room name to server
+                ws.send(JSON.stringify({type:1,data:{username:author,content:msg.value,roomName:"${name}"}})); // send type 1(new msg), and our username,the message, room name to server
                 msg.value = ""; // clear the message box after sending the data
             }
         </script>
-        <title>KitChat - ${room.name}</title>
+        <title>KitChat - ${name}</title>
     </head>
 
     <body>
@@ -55,7 +55,7 @@
         <script type="text/javascript" src="/static/js/mdb.js"></script>
 
         <div class="container justify-content-center">
-            <h2 class="font-weight-bold my-5">Chat Room - ${room.name}</h2>
+            <h2 class="font-weight-bold my-5">Chat Room - ${name}</h2>
 
         <div id="msgboard" class="my-5">
 
@@ -68,8 +68,8 @@
             </div>
 
             <div class="form-group">
-                <p>Chatting as ${room.username}</p>
-                <input hidden id="username" name="username" value=${room.username} />
+                <p>Chatting as ${username}</p>
+                <input hidden id="username" name="username" value=${username} />
             </div>
             <div class="form-group">
                 <button type="button" onclick="sendMessage()" class="btn btn-brown">Send</button>

@@ -18,13 +18,14 @@ import io.ktor.http.content.resources
 import io.ktor.http.content.static
 import io.ktor.util.toZonedDateTime
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.net.Socket
 import java.nio.channels.ClosedChannelException
 import java.util.*
 import kotlin.collections.LinkedHashSet
 
-val connections =  Collections.synchronizedSet(LinkedHashSet<SocketSession>()) // store all Websocket connections
+val connections =  arrayListOf<SocketSession>() // store all Websocket connections
 val rooms = arrayListOf<RoomData>() // store all the rooms
 
 fun main(args: Array<String>): Unit = io.ktor.server.netty.EngineMain.main(args)
@@ -65,17 +66,9 @@ fun Application.module(testing: Boolean = false) {
         get("/chatroom"){
             val roomName = call.request.queryParameters["roomName"] // get room name from queryString
 
-            var newRoom:RoomData? = null
+            val userSession = call.sessions.get<UserSession>()
 
-            if (rooms.find { it.name == roomName } == null) {
-                newRoom = roomName?.let { it1 -> RoomData(it1, arrayListOf()) } // create a new, let check to ensure roomName isn't null
-                newRoom?.let { room-> rooms.add(room) }  // add new room to our array
-            }
-
-
-            newRoom?.let{r-> call.respond(FreeMarkerContent("chat.ftl",mapOf("room" to r),"")) }
-
-            call.respond(HttpStatusCode.NotFound,"Room Cannot be found")
+            call.respond(FreeMarkerContent("chat.ftl",mapOf("name" to roomName,"username" to userSession?.username ),""))
         }
 
         post("/enterchat"){
@@ -110,7 +103,8 @@ fun Application.module(testing: Boolean = false) {
                     }
                 }
             }catch(e:ClosedReceiveChannelException) {
-                connections -= client
+                connections.removeIf { c-> c.user.id == client.user.id }
+                removeFromRooms(client)
                 println("${client.user.username} disconnect( ${client.user.id})")
             } catch (e: Throwable) {
                 e.printStackTrace()
@@ -124,12 +118,13 @@ fun Application.module(testing: Boolean = false) {
 suspend fun handleSocketMessage(msg:SocketMsg){
     if(msg.type == MsgType.HANDSHAKE.raw){ // if we're in the handshake phase (type 0)
 
-        val handshakeData = Gson().fromJson(msg.data,UserSession::class.java) // parse our data field as UserSession class
+        val handshakeData = Gson().fromJson(msg.data,HandshakeData::class.java) // parse our data field as UserSession class
         connections.forEach {
-            if(it.user.id == handshakeData.id) // loop through all WebSocketSessions and see if the SocketId sent from client matches any active WebSocketSession SocketId
+            if (it.user.id == handshakeData.id) { // loop through all WebSocketSessions and see if the SocketId sent from client matches any active WebSocketSession SocketId
                 it.user.username = handshakeData.username // if we get a hit then we want to now set the username sent from client in the handshake phase to make things easier to search for
+                addToRoom(handshakeData.room,it)
+            }
         }
-
         connections.forEach { it.webSocketSession.send(createServerMsgString(-1,handshakeData)) }
 
     }else if(msg.type == MsgType.CHAT_MESSAGE.raw){
@@ -174,9 +169,24 @@ suspend fun roomBroadcast(room:String, msg:String) {
 
 }
 
+fun addToRoom(room:String,socketSession:SocketSession){
+    val roomToFind = rooms.find { it.name == room }
+    if (roomToFind == null) {
+        rooms.add(RoomData(room, arrayListOf(socketSession)) )  // add new room to our array
+    }else{
+        roomToFind.users.add(socketSession)
+    }
+}
+
+fun removeFromRooms(socketSession:SocketSession){
+    rooms.forEach { room->
+        room.users.removeIf { u-> u.user.id == socketSession.user.id }
+    }
+}
+
 data class SocketMsg(val type:Int,var data:String)
 data class ChatData(val username:String, val content:String, val roomName: String, var msgTimestamp: Date )
 data class RoomData(val name:String, var users: ArrayList<SocketSession>)
 data class UserSession(val id:String,var username:String?)
-
+data class HandshakeData(val id:String,val username:String,val room:String)
 data class SocketSession(val user:UserSession,val webSocketSession: WebSocketSession)
