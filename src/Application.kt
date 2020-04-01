@@ -20,15 +20,10 @@ import io.ktor.http.content.static
 import io.ktor.server.engine.commandLineEnvironment
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
-import io.ktor.util.toZonedDateTime
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
-import kotlinx.coroutines.runBlocking
 import org.litote.kmongo.*
-import java.io.File
-import java.net.Socket
-import java.nio.channels.ClosedChannelException
 import java.util.*
-import kotlin.collections.LinkedHashSet
+import org.mindrot.jbcrypt.BCrypt
 
 val connections =  arrayListOf<SocketSession>() // store all Websocket connections
 val rooms = arrayListOf<RoomData>() // store all the rooms
@@ -36,7 +31,7 @@ val uri = MongoClientURI("mongodb://root:rootPassword@localhost:27017/")
 val mongoClient = KMongo.createClient(uri = uri)
 
 val db = mongoClient.getDatabase("kitchatDB")
-val userCol = db.getCollection<UserSession>()
+val userCol = db.getCollection<User>()
 val chatCol = db.getCollection<ChatData>()
 
 fun main(args: Array<String>){
@@ -50,6 +45,7 @@ fun Application.module(testing: Boolean = false) {
     install(FreeMarker) {
         templateLoader = ClassTemplateLoader(this::class.java.classLoader, "templates")
     }
+
 
     install(Sessions) {
         cookie<UserSession>("MY_SESSION") {
@@ -87,18 +83,59 @@ fun Application.module(testing: Boolean = false) {
         }
 
         get("/signup"){
-
+            call.respond(FreeMarkerContent("signup.ftl",null,"e"))
         }
         post("/signup"){
+            val rawData = call.receiveParameters()
+            val signUpInfo =
+                rawData["username"]?.let { it1 -> rawData["password"]?.let { it2 ->
+                    rawData["verifypassword"]?.let { it3 ->
+                        SignUpForm(it1, it2, it3)
+                    }
+                }
+                }
 
+            val user = signUpInfo?.let{
+                User(signUpInfo.username,BCrypt.hashpw(signUpInfo.password,BCrypt.gensalt(12))) // create new user with hashed password
+            }
+
+            user?.let{userCol.insertOne(it)} // insert user if it's not null
+
+            call.respondRedirect("/login")
         }
 
 
         get("/login"){
 
+            call.respond(FreeMarkerContent("login.ftl",null,"e"))
         }
         post("/login"){
+            val rawFormData = call.receiveParameters() // get the form data form the request
 
+            //if the username from the form is not empty
+            rawFormData["username"]?.let{ username->
+
+                val userToAuth = userCol.findOne(User::username eq username) // Get the user specified from form data
+                if(userToAuth == null)
+                {
+                    // If we don't find any users with the given username then notify the client
+                    call.respond(HttpStatusCode.Unauthorized,"Invalid Username or Password")
+                    return@post
+                }else{
+                    //if password from form exists
+                    rawFormData["password"]?.let{ pass->
+
+                        //Check form password with the hashed password from the database and see if it's correct
+                        if(BCrypt.checkpw(pass,userToAuth.password)){
+                            println("valid User!")
+                            call.respondRedirect("/")
+                        }else{
+                            println("invalid User!")
+                            call.respondRedirect("/login")
+                        }
+                    }
+                }
+            }
         }
 
 
@@ -153,7 +190,6 @@ suspend fun handleSocketMessage(msg:SocketMsg){
         connections.forEach {
             if (it.user.id == handshakeData.id) { // loop through all WebSocketSessions and see if the SocketId sent from client matches any active WebSocketSession SocketId
                 it.user.username = handshakeData.username // if we get a hit then we want to now set the username sent from client in the handshake phase to make things easier to search for
-                userCol.insertOne(it.user)
                 addToRoom(handshakeData.room,it)
 
             }
@@ -226,6 +262,11 @@ data class SocketMsg(val type:Int,var data:String)
 data class ChatData(val username:String, val content:String, val roomName: String, var msgTimestamp: Date )
 data class RoomData(val name:String, var users: ArrayList<SocketSession>)
 
+
+data class SignUpForm(val username:String,var password:String,var verifypassword:String)
+data class LoginForm(val username:String,var password:String)
+
+data class User(var username:String,var password:String)
 data class UserSession(val id:String,var username:String?)
 data class HandshakeData(val id:String,val username:String,val room:String)
 data class SocketSession(val user:UserSession,val webSocketSession: WebSocketSession)

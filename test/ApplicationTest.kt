@@ -16,6 +16,7 @@ import io.ktor.features.*
 import io.ktor.client.*
 import kotlin.test.*
 import io.ktor.server.testing.*
+import org.mindrot.jbcrypt.BCrypt
 
 class ApplicationTest {
     @Test
@@ -25,5 +26,23 @@ class ApplicationTest {
                 assertEquals(HttpStatusCode.OK, response.status())
             }
         }
+    }
+
+    @Test
+    fun validUserTest(){
+        val user = User("akash227", BCrypt.hashpw("test123",BCrypt.gensalt(12)))
+
+        val loginCred = LoginForm("akash227","test123")
+
+        assertTrue(BCrypt.checkpw(loginCred.password,user.password))
+    }
+
+    @Test
+    fun invalidUserTest(){
+        val user = User("akash227", BCrypt.hashpw("test123",BCrypt.gensalt(12)))
+
+        val loginCred = LoginForm("akash227","test12322222")
+
+        assertFalse(BCrypt.checkpw(loginCred.password,user.password))
     }
 }
