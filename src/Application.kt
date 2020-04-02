@@ -15,7 +15,6 @@ import io.ktor.http.cio.websocket.*
 import java.time.*
 import io.ktor.gson.*
 import io.ktor.features.*
-import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.resources
 import io.ktor.http.content.static
 import io.ktor.server.engine.commandLineEnvironment
@@ -64,10 +63,7 @@ fun Application.module(testing: Boolean = false) {
 
     }
 
-    install(Authentication){
-        configureSessionAuth()
-        configureFormAuth()
-    }
+
 
     install(WebSockets) {
         pingPeriod = Duration.ofSeconds(15)
@@ -86,86 +82,7 @@ fun Application.module(testing: Boolean = false) {
         static("/static"){
             resources("static")
         }
-        get("/") {
-            val principal = call.sessions.get<UserIdPrincipal>()
-            call.respond(FreeMarkerContent("index.ftl",mapOf("user" to principal),""))
 
-        }
-
-
-        get("/signup"){
-            val principal = call.sessions.get<UserIdPrincipal>()
-            call.respond(FreeMarkerContent("signup.ftl",mapOf("user" to principal),"e"))
-        }
-        post("/signup"){
-            val rawData = call.receiveParameters()
-            val signUpInfo =
-                rawData["username"]?.let { it1 -> rawData["password"]?.let { it2 ->
-                    rawData["verifypassword"]?.let { it3 ->
-                        SignUpForm(it1, it2, it3)
-                    }
-                }
-                }
-
-            val user = signUpInfo?.let{
-                User(signUpInfo.username,BCrypt.hashpw(signUpInfo.password,BCrypt.gensalt(12))) // create new user with hashed password
-            }
-
-            user?.let{userCol.insertOne(it)} // insert user if it's not null
-
-            call.respondRedirect("/login")
-        }
-
-
-        get("/login"){
-            val error = call.request.queryParameters["error"]
-            val principal = call.sessions.get<UserIdPrincipal>()
-
-            if(call.authentication.principal<UserIdPrincipal>() != null){
-                println("authenticated")
-            }
-            call.respond(FreeMarkerContent("login.ftl",mapOf("user" to principal,"error" to error),"e"))
-        }
-
-        get("logout"){
-            call.sessions.clear<UserIdPrincipal>()
-            call.respondRedirect("/")
-        }
-
-        // authenticate using our Form authentication method defined below
-        authenticate("form"){
-            // our POST request of /login from the form
-            post("/login"){
-                // this part is called once the user has successfully been authenticated
-                val principal = call.principal<UserIdPrincipal>()!!  // get the principal from the authed users
-                call.sessions.set(principal) // set the session with the principal
-                call.respondRedirect("/") // redirect to default 'login successful' page or in this case back to homepage
-            }
-        }
-
-        // If they user if authenticated their auth info will be stored in the session,
-        // so we must use authenticate(session) for any routes where we require the user to be logged in
-        authenticate("session") {
-            get("profile"){
-                val principal = call.principal<UserIdPrincipal>()!! // get the principal from the session
-                println(principal)
-            }
-
-            get("/chatroom"){
-                val roomName = call.request.queryParameters["roomName"] // get room name from queryString
-
-                val userSession = call.principal<UserIdPrincipal>()!! // will be used to pass the username down
-                val chatMsgs = chatCol.find(ChatData::roomName eq roomName).into(mutableListOf<ChatData>()) // find all the chat logs from this specific room
-                call.respond(FreeMarkerContent("chat.ftl",mapOf("name" to roomName,"username" to userSession.name,"chat" to chatMsgs ),"")) // render the FTL template with the required data
-            }
-        }
-
-        post("/enterchat"){
-            val formData = call.receiveParameters()
-
-
-            call.respondRedirect("/chatroom?roomName="+formData["roomName"])
-        }
         webSocket("/chat") {
             val client = SocketSession(UserSession(UUID.randomUUID().toString(),null),this) // generate random uuid for socketId and null username for not
             connections += client
@@ -198,7 +115,6 @@ fun Application.module(testing: Boolean = false) {
             }
         }
 
-
     }
 }
 
@@ -229,53 +145,6 @@ suspend fun handleSocketMessage(msg:SocketMsg){
     }
 }
 
-private fun Authentication.Configuration.configureFormAuth() {
-
-    form("form") {
-
-        userParamName = "username" // name of username field in form
-        passwordParamName = "password" //name of password field in form
-        challenge {
-
-            val errors:  List<AuthenticationFailedCause> = call.authentication.allFailures
-            when (errors.singleOrNull()) {
-                AuthenticationFailedCause.InvalidCredentials ->
-                    call.respondRedirect("/login?error=invalid") // if invalid credentials redirect with invalid so we have appropriate err msg
-
-                AuthenticationFailedCause.NoCredentials ->
-                    call.respondRedirect("/login?error=no") // no credentials, throw with no credentials
-
-                else ->
-                    call.respondRedirect("/login") // any other errors just redirect
-            }
-        }
-        validate { cred: UserPasswordCredential ->
-            // actual validation login
-
-            // we retrieve the username from our database User collection and if not found return with null which will throw AuthenticationFailedCause.InvalidCredentials shown above
-
-            val userDbInfo = userCol.findOne(User::username eq cred.name) ?: return@validate null
-
-            if (BCrypt.checkpw(cred.password,userDbInfo.password)) // use BCrypt to check plain password (cred.password) from the form against the hashed password from the database
-                UserIdPrincipal(cred.name) // store username in the UserIdPrincipal if they match
-            else
-                null // if they don't match null will throw AuthenticationFailedCause.InvalidCredentials
-        }
-    }
-}
-
-private fun Authentication.Configuration.configureSessionAuth() {
-    session<UserIdPrincipal>("session") {
-        challenge {
-            // redirect if the user isn't logged in
-            call.respondRedirect("/login")
-        }
-        validate { session: UserIdPrincipal ->
-            // If you need to do additional validation on session data, you can do so here.
-            session
-        }
-    }
-}
 
 
 //MsgType will be used when sending messages from client/server it will be used to identify which type of messages are sent
