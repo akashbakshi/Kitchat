@@ -42,6 +42,7 @@ dependencies {
     implementation "io.ktor:ktor-gson:$ktor_version"
     implementation "io.ktor:ktor-client-core:$ktor_version"
     implementation "io.ktor:ktor-client-core-jvm:$ktor_version"
+    implementation "io.ktor:ktor-auth:$ktor_version"
     implementation 'org.litote.kmongo:kmongo:3.12.2'
     compile group: 'org.mindrot', name: 'jbcrypt', version: '0.4'
     testImplementation "io.ktor:ktor-server-tests:$ktor_version"

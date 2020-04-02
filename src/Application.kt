@@ -7,6 +7,7 @@ import io.ktor.response.*
 import io.ktor.request.*
 import io.ktor.routing.*
 import freemarker.cache.*
+import io.ktor.auth.*
 import io.ktor.freemarker.*
 import io.ktor.sessions.*
 import io.ktor.websocket.*
@@ -48,12 +49,27 @@ fun Application.module(testing: Boolean = false) {
 
 
     install(Sessions) {
-        cookie<UserSession>("MY_SESSION") {
+        cookie<UserIdPrincipal>(
+            // We set a cookie by this name upon login.
+            "auth",
+            // Stores session contents in memory...good for development only.
+            storage = SessionStorageMemory()
+        ) {
+            cookie.path = "/"
+            // CSRF protection in modern browsers. Make sure your important side-effect-y operations, like ordering,
+            // uploads, and changing settings, use "unsafe" HTTP verbs like POST and PUT, not GET or HEAD.
+            // https://developer.mozilla.org/en-US/docs/Web/HTTP/Cookies#SameSite_cookies
             cookie.extensions["SameSite"] = "lax"
         }
+
     }
 
-    install(io.ktor.websocket.WebSockets) {
+    install(Authentication){
+        configureSessionAuth()
+        configureFormAuth()
+    }
+
+    install(WebSockets) {
         pingPeriod = Duration.ofSeconds(15)
         timeout = Duration.ofSeconds(15)
         maxFrameSize = Long.MAX_VALUE
@@ -74,13 +90,7 @@ fun Application.module(testing: Boolean = false) {
             call.respond(FreeMarkerContent("index.ftl",null,""))
 
         }
-        get("/chatroom"){
-            val roomName = call.request.queryParameters["roomName"] // get room name from queryString
 
-            val userSession = call.sessions.get<UserSession>()
-            val chatMsgs = chatCol.find(ChatData::roomName eq roomName).into(mutableListOf<ChatData>())
-            call.respond(FreeMarkerContent("chat.ftl",mapOf("name" to roomName,"username" to userSession?.username,"chat" to chatMsgs ),""))
-        }
 
         get("/signup"){
             call.respond(FreeMarkerContent("signup.ftl",null,"e"))
@@ -106,38 +116,39 @@ fun Application.module(testing: Boolean = false) {
 
 
         get("/login"){
-
+            if(call.authentication.principal<UserIdPrincipal>() != null){
+                println("authenticated")
+            }
             call.respond(FreeMarkerContent("login.ftl",null,"e"))
         }
-        post("/login"){
-            val rawFormData = call.receiveParameters() // get the form data form the request
 
-            //if the username from the form is not empty
-            rawFormData["username"]?.let{ username->
-
-                val userToAuth = userCol.findOne(User::username eq username) // Get the user specified from form data
-                if(userToAuth == null)
-                {
-                    // If we don't find any users with the given username then notify the client
-                    call.respond(HttpStatusCode.Unauthorized,"Invalid Username or Password")
-                    return@post
-                }else{
-                    //if password from form exists
-                    rawFormData["password"]?.let{ pass->
-
-                        //Check form password with the hashed password from the database and see if it's correct
-                        if(BCrypt.checkpw(pass,userToAuth.password)){
-                            println("valid User!")
-                            call.respondRedirect("/")
-                        }else{
-                            println("invalid User!")
-                            call.respondRedirect("/login")
-                        }
-                    }
-                }
+        // authenticate using our Form authentication method defined below
+        authenticate("form"){
+            // our POST request of /login from the form
+            post("/login"){
+                // this part is called once the user has successfully been authenticated
+                val principal = call.principal<UserIdPrincipal>()!!  // get the principal from the authed users
+                call.sessions.set(principal) // set the session with the principal
+                call.respondRedirect("/") // redirect to default 'login successful' page or in this case back to homepage
             }
         }
 
+        // If they user if authenticated their auth info will be stored in the session,
+        // so we must use authenticate(session) for any routes where we require the user to be logged in
+        authenticate("session") {
+            get("profile"){
+                val principal = call.principal<UserIdPrincipal>()!! // get the principal from the session
+                println(principal)
+            }
+
+            get("/chatroom"){
+                val roomName = call.request.queryParameters["roomName"] // get room name from queryString
+
+                val userSession = call.principal<UserIdPrincipal>()!! // will be used to pass the username down
+                val chatMsgs = chatCol.find(ChatData::roomName eq roomName).into(mutableListOf<ChatData>()) // find all the chat logs from this specific room
+                call.respond(FreeMarkerContent("chat.ftl",mapOf("name" to roomName,"username" to userSession.name,"chat" to chatMsgs ),"")) // render the FTL template with the required data
+            }
+        }
 
         post("/enterchat"){
             val formData = call.receiveParameters()
@@ -149,7 +160,6 @@ fun Application.module(testing: Boolean = false) {
         webSocket("/chat") {
             val client = SocketSession(UserSession(UUID.randomUUID().toString(),null),this) // generate random uuid for socketId and null username for not
             connections += client
-            println("connected user: ${client.user.id}")
             client.webSocketSession.send(createServerMsgString(0,client.user)) // send the type 0 for initial handshake to client and the socketId down
             // to the user so they can send their username in the future to associate with their unique socketId
             try {
@@ -192,6 +202,7 @@ suspend fun handleSocketMessage(msg:SocketMsg){
                 it.user.username = handshakeData.username // if we get a hit then we want to now set the username sent from client in the handshake phase to make things easier to search for
                 addToRoom(handshakeData.room,it)
 
+                roomBroadcast(handshakeData.room,createServerMsgString(-1,it.user))
             }
         }
         connections.forEach { it.webSocketSession.send(createServerMsgString(-1,handshakeData)) }
@@ -209,6 +220,55 @@ suspend fun handleSocketMessage(msg:SocketMsg){
     }
 }
 
+private fun Authentication.Configuration.configureFormAuth() {
+
+    form("form") {
+
+        userParamName = "username" // name of username field in form
+        passwordParamName = "password" //name of password field in form
+        challenge {
+
+            val errors: Map<Any, AuthenticationFailedCause> = call.authentication.errors
+            when (errors.values.singleOrNull()) {
+                AuthenticationFailedCause.InvalidCredentials ->
+                    call.respondRedirect("/login?invalid") // if invalid credentials redirect with invalid so we have appropriate err msg
+
+                AuthenticationFailedCause.NoCredentials ->
+                    call.respondRedirect("/login?no") // no credentials, throw with no credentials
+
+                else ->
+                    call.respondRedirect("/login") // any other errors just redirect
+            }
+        }
+        validate { cred: UserPasswordCredential ->
+            // actual validation login
+
+            // we retrieve the username from our database User collection and if not found return with null which will throw AuthenticationFailedCause.InvalidCredentials shown above
+
+            val userDbInfo = userCol.findOne(User::username eq cred.name) ?: return@validate null
+
+            if (BCrypt.checkpw(cred.password,userDbInfo.password)) // use BCrypt to check plain password (cred.password) from the form against the hashed password from the database
+                UserIdPrincipal(cred.name) // store username in the UserIdPrincipal if they match
+            else
+                null // if they don't match null will throw AuthenticationFailedCause.InvalidCredentials
+        }
+    }
+}
+
+private fun Authentication.Configuration.configureSessionAuth() {
+    session<UserIdPrincipal>("session") {
+        challenge {
+            // redirect if the user isn't logged in
+            call.respondRedirect("/login")
+        }
+        validate { session: UserIdPrincipal ->
+            // If you need to do additional validation on session data, you can do so here.
+            session
+        }
+    }
+}
+
+
 //MsgType will be used when sending messages from client/server it will be used to identify which type of messages are sent
 // so we can parse the data: object appropriately, for example in the type 0 HANDSHAKE phase client will send socketId & username
 // So we parse it as UserSession class using GSON, but in type 1 CHAT_MESSAGE client sends different chat related data so we
@@ -224,6 +284,7 @@ enum class MsgType(val raw:Int){
 fun createServerMsgString(type:Int,data:Any):String =  "{\"type\":$type,\"data\":${Gson().toJson(data)}}" // function used to dynamically create JSON string based on type and data and return it
 
 suspend fun globalBroadcast(msg:String) = connections.forEach { it.webSocketSession.send(msg) } // function used to broadcast to ALL websocket users
+
 suspend fun roomBroadcast(room:String, msg:String) {
     // This function will be used to broadcast to all users in a given room
 
@@ -248,7 +309,6 @@ fun addToRoom(room:String,socketSession:SocketSession){
     }else{
         roomToFind.users.add(socketSession)
     }
-
 
 }
 

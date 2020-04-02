@@ -4,6 +4,7 @@
         <script>
             let ws = new WebSocket("ws://localhost:5000/chat");
             var socketId;
+            var users = {};
             ws.onopen = function(e){
                 //
             };
@@ -11,14 +12,23 @@
             ws.onmessage = function(event){
                 let msgData = JSON.parse(event.data);
 
-                if(msgData.type == -1){
+                if(msgData.type === -2){
                     //if a new user has joined we will add it to our div area indicating all users
-                    console.log(msgData.data)
+
+                    users -= msgData.data;
+                    console.log(users);
+                }
+                if(msgData.type === -1){
+                    //if a new user has joined we will add it to our div area indicating all users
+
+                    users += msgData.data;
+                    console.log(users);
                 }
                 else if(msgData.type === 0){
                     // initial handshake type, we will get the socketId, set our var and then send a message back with our username
                     socketId = msgData.data.id;
                     ws.send(JSON.stringify({"type":0,"data":{"id":socketId,"username":"${username}","room":"${name}"}}));
+                    users += "${username}";
                 } else if(msgData.type === 1){
                     // if we get type 1, we have received a new message in our chat room, we will add the card with the message details to our page
                     let msgBoard = document.getElementById("msgboard");
@@ -51,6 +61,8 @@
         <div class="container justify-content-center">
             <h2 class="font-weight-bold my-5">Chat Room - ${name}</h2>
 
+            <div id="userboard">
+            </div>
             <div id="msgboard" class="my-2">
             <#list chat as msg>
 
