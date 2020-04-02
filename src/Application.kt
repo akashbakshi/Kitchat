@@ -87,13 +87,15 @@ fun Application.module(testing: Boolean = false) {
             resources("static")
         }
         get("/") {
-            call.respond(FreeMarkerContent("index.ftl",null,""))
+            val principal = call.sessions.get<UserIdPrincipal>()
+            call.respond(FreeMarkerContent("index.ftl",mapOf("user" to principal),""))
 
         }
 
 
         get("/signup"){
-            call.respond(FreeMarkerContent("signup.ftl",null,"e"))
+            val principal = call.sessions.get<UserIdPrincipal>()
+            call.respond(FreeMarkerContent("signup.ftl",mapOf("user" to principal),"e"))
         }
         post("/signup"){
             val rawData = call.receiveParameters()
@@ -116,10 +118,18 @@ fun Application.module(testing: Boolean = false) {
 
 
         get("/login"){
+            val error = call.request.queryParameters["error"]
+            val principal = call.sessions.get<UserIdPrincipal>()
+
             if(call.authentication.principal<UserIdPrincipal>() != null){
                 println("authenticated")
             }
-            call.respond(FreeMarkerContent("login.ftl",null,"e"))
+            call.respond(FreeMarkerContent("login.ftl",mapOf("user" to principal,"error" to error),"e"))
+        }
+
+        get("logout"){
+            call.sessions.clear<UserIdPrincipal>()
+            call.respondRedirect("/")
         }
 
         // authenticate using our Form authentication method defined below
@@ -152,9 +162,8 @@ fun Application.module(testing: Boolean = false) {
 
         post("/enterchat"){
             val formData = call.receiveParameters()
-            println(formData)
 
-            call.sessions.set(formData["username"]?.let { it1 -> UserSession(UUID.randomUUID().toString(),it1) })
+
             call.respondRedirect("/chatroom?roomName="+formData["roomName"])
         }
         webSocket("/chat") {
@@ -228,13 +237,13 @@ private fun Authentication.Configuration.configureFormAuth() {
         passwordParamName = "password" //name of password field in form
         challenge {
 
-            val errors: Map<Any, AuthenticationFailedCause> = call.authentication.errors
-            when (errors.values.singleOrNull()) {
+            val errors:  List<AuthenticationFailedCause> = call.authentication.allFailures
+            when (errors.singleOrNull()) {
                 AuthenticationFailedCause.InvalidCredentials ->
-                    call.respondRedirect("/login?invalid") // if invalid credentials redirect with invalid so we have appropriate err msg
+                    call.respondRedirect("/login?error=invalid") // if invalid credentials redirect with invalid so we have appropriate err msg
 
                 AuthenticationFailedCause.NoCredentials ->
-                    call.respondRedirect("/login?no") // no credentials, throw with no credentials
+                    call.respondRedirect("/login?error=no") // no credentials, throw with no credentials
 
                 else ->
                     call.respondRedirect("/login") // any other errors just redirect

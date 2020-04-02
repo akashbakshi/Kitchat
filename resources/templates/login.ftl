@@ -7,6 +7,11 @@
         <#include "menu.ftl">
 
         <div class="container">
+            <#if (error??)>
+                <div class="alert alert-danger my-2" role="alert">
+                   Invalid Username or Password Combination
+                </div>
+            </#if>
             <h2 class="text-center font-weight-bold my-3">Log In</h2>
 
             <form class="my-4" action="/login" method="post">
