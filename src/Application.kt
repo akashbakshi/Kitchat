@@ -3,8 +3,6 @@ package com.akashbakshi
 import com.google.gson.Gson
 import com.mongodb.MongoClientURI
 import io.ktor.application.*
-import io.ktor.response.*
-import io.ktor.request.*
 import io.ktor.routing.*
 import freemarker.cache.*
 import io.ktor.auth.*
@@ -127,10 +125,10 @@ suspend fun handleSocketMessage(msg:SocketMsg){
                 it.user.username = handshakeData.username // if we get a hit then we want to now set the username sent from client in the handshake phase to make things easier to search for
                 addToRoom(handshakeData.room,it)
 
-                roomBroadcast(handshakeData.room,createServerMsgString(-1,it.user))
+                roomBroadcast(handshakeData.room,createServerMsgString(MsgType.NEW_USER.raw,it.user))
             }
         }
-        connections.forEach { it.webSocketSession.send(createServerMsgString(-1,handshakeData)) }
+        connections.forEach { it.webSocketSession.send(createServerMsgString(MsgType.NEW_USER.raw,handshakeData)) }
 
     }else if(msg.type == MsgType.CHAT_MESSAGE.raw){
         //we received a message from the chat box
@@ -154,6 +152,8 @@ suspend fun handleSocketMessage(msg:SocketMsg){
 // action type so DIRECT (type 2) will be a direct message sent to a specific user's DM rather than broadcasted to all users in a room
 
 enum class MsgType(val raw:Int){
+    USER_LEFT(-2),
+    NEW_USER(-1),
     HANDSHAKE(0),
     CHAT_MESSAGE(1),
     DIRECT(2)
